@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Face Expression Synth & Chord Generator</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- MediaPipe Face Mesh and Camera Utilities -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+  <style>
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at 15% 15%, #0f172a 0%, #090d16 50%, #030712 100%);
+      color: #f1f5f9;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      border-radius: 1rem;
+    }
+
+    .glass-panel-glow {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      box-shadow: 0 0 25px rgba(139, 92, 246, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      border-radius: 1rem;
+    }
+
+    .glass-input {
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #f8fafc;
+      transition: all 0.2s ease;
+    }
+    .glass-input:focus {
+      outline: none;
+      border-color: #a855f7;
+      box-shadow: 0 0 12px rgba(168, 85, 247, 0.3);
+    }
+
+    /* Range slider custom styling */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: rgba(51, 65, 85, 0.5);
+      border-radius: 8px;
+      height: 6px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 16px;
+      width: 16px;
+      border-radius: 50%;
+      background: #c084fc;
+      box-shadow: 0 0 10px #c084fc;
+      cursor: pointer;
+      transition: transform 0.1s ease;
+    }
+    input[type=range]::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    /* Sequencer vertical slider */
+    .vertical-slider {
+      writing-mode: bt-lr;
+      -webkit-appearance: slider-vertical;
+      width: 8px;
+      height: 85px;
+    }
+
+    .step-current {
+      background: rgba(168, 85, 247, 0.35) !important;
+      border-color: #a855f7 !important;
+      box-shadow: 0 0 15px #a855f7;
+    }
+  </style>
+</head>
+<body class="p-3 md:p-6 text-slate-200 min-h-screen flex flex-col">
+
+  <!-- Top Navigation & Header -->
+  <header class="glass-panel p-4 mb-6 flex flex-wrap justify-between items-center gap-4 border-b border-slate-700/50">
+    <div class="flex items-center gap-3">
+      <div class="p-2.5 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-lg shadow-purple-500/30">
+        <i data-lucide="activity" class="w-6 h-6 text-white"></i>
+      </div>
+      <div>
+        <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-purple-300 to-pink-400">
+          Face Expression Synth & Chord Generator
+        </h1>
+        <p class="text-xs text-slate-400">Isolated Facial Muscle Emotion Analytics & Harmonic Mapping</p>
+      </div>
+    </div>
+
+    <!-- Active Chord Banner -->
+    <div class="flex items-center gap-4 bg-slate-900/60 px-5 py-2.5 rounded-2xl border border-purple-500/30 shadow-inner">
+      <div class="text-right">
+        <span class="text-[10px] uppercase tracking-widest text-slate-400 block font-semibold">Active Chord</span>
+        <span id="chord-display-name" class="text-2xl font-black text-cyan-300 tracking-wider">C</span>
+      </div>
+      <div class="h-8 w-px bg-slate-700/80"></div>
+      <div>
+        <span class="text-[10px] uppercase tracking-widest text-slate-400 block font-semibold">Harmonic Function</span>
+        <span id="chord-display-function" class="text-xs font-semibold px-2 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-800/50">
+          Tonic (Major)
+        </span>
+      </div>
+      <div class="h-8 w-px bg-slate-700/80"></div>
+      <div class="hidden sm:block">
+        <span class="text-[10px] uppercase tracking-widest text-slate-400 block font-semibold">Notes</span>
+        <span id="chord-display-notes" class="text-xs font-mono text-pink-300">C4 · E4 · G4 · C5</span>
+      </div>
+    </div>
+
+    <!-- Audio Master & Engine Toggle -->
+    <div class="flex items-center gap-3">
+      <button id="btn-audio-start" class="px-5 py-2.5 rounded-xl font-semibold text-sm bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/25 transition-all active:scale-95 flex items-center gap-2">
+        <i data-lucide="power" class="w-4 h-4"></i>
+        <span id="audio-btn-label">Start Audio Engine</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Grid Layout -->
+  <main class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-grow">
+
+    <!-- LEFT COLUMN: Camera Feed, Real-time 4-Emotion Analysis, Calibration -->
+    <section class="lg:col-span-4 flex flex-col gap-6">
+      
+      <!-- Video & Canvas Overlay Panel -->
+      <div class="glass-panel p-4 flex flex-col items-center relative overflow-hidden">
+        <div class="w-full flex justify-between items-center mb-3">
+          <div class="flex items-center gap-2">
+            <i data-lucide="camera" class="w-4 h-4 text-cyan-400"></i>
+            <h2 class="text-sm font-semibold text-slate-200">Face Tracking & Landmarks</h2>
+          </div>
+          <span id="camera-status" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-amber-400 border border-amber-500/30">
+            Camera Standby
+          </span>
+        </div>
+
+        <div class="relative w-full aspect-video bg-slate-950 rounded-xl overflow-hidden border border-slate-800 shadow-inner flex items-center justify-center">
+          <video id="webcam-video" class="absolute inset-0 w-full h-full object-cover -scale-x-100 hidden" playsinline muted></video>
+          <canvas id="face-canvas" class="absolute inset-0 w-full h-full object-cover -scale-x-100 z-10"></canvas>
+          
+          <div id="camera-placeholder" class="text-center p-4 z-0">
+            <i data-lucide="video-off" class="w-10 h-10 text-slate-600 mx-auto mb-2"></i>
+            <p class="text-xs text-slate-400">Click below to start webcam & face tracking</p>
+          </div>
+        </div>
+
+        <div class="w-full mt-3 flex gap-2">
+          <button id="btn-start-camera" class="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-cyan-300 border border-slate-700 transition flex items-center justify-center gap-1.5">
+            <i data-lucide="video" class="w-3.5 h-3.5"></i> Enable Camera
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Emotion Recognition Panel (Joy, Sadness, Anger, Surprise) -->
+      <div class="glass-panel p-4 flex flex-col gap-3">
+        <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+          <i data-lucide="smile-plus" class="w-4 h-4 text-emerald-400"></i>
+          Facial Emotion Detection (4-Axis)
+        </h3>
+
+        <!-- Joy / Smile -->
+        <div>
+          <div class="flex justify-between text-xs mb-1">
+            <span class="text-slate-300 font-medium flex items-center gap-1">
+              <i data-lucide="smile" class="w-3.5 h-3.5 text-yellow-400"></i>
+              Joy / Smile (笑顔/喜び)
+            </span>
+            <span id="meter-joy-val" class="font-mono text-yellow-400">0%</span>
+          </div>
+          <div class="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden p-0.5 border border-slate-800">
+            <div id="meter-joy-bar" class="h-full bg-yellow-400 rounded-full w-0 transition-all duration-75"></div>
+          </div>
+        </div>
+
+        <!-- Sadness / Crying -->
+        <div>
+          <div class="flex justify-between text-xs mb-1">
+            <span class="text-slate-300 font-medium flex items-center gap-1">
+              <i data-lucide="frown" class="w-3.5 h-3.5 text-blue-400"></i>
+              Sadness / Crying (悲しみ/泣き)
+            </span>
+            <span id="meter-sad-val" class="font-mono text-blue-400">0%</span>
+          </div>
+          <div class="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden p-0.5 border border-slate-800">
+            <div id="meter-sad-bar" class="h-full bg-blue-500 rounded-full w-0 transition-all duration-75"></div>
+          </div>
+        </div>
+
+        <!-- Anger -->
+        <div>
+          <div class="flex justify-between text-xs mb-1">
+            <span class="text-slate-300 font-medium flex items-center gap-1">
+              <i data-lucide="flame" class="w-3.5 h-3.5 text-rose-400"></i>
+              Anger (怒り)
+            </span>
+            <span id="meter-anger-val" class="font-mono text-rose-400">0%</span>
+          </div>
+          <div class="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden p-0.5 border border-slate-800">
+            <div id="meter-anger-bar" class="h-full bg-rose-500 rounded-full w-0 transition-all duration-75"></div>
+          </div>
+        </div>
+
+        <!-- Surprise -->
+        <div>
+          <div class="flex justify-between text-xs mb-1">
+            <span class="text-slate-300 font-medium flex items-center gap-1">
+              <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-300"></i>
+              Surprise (驚き)
+            </span>
+            <span id="meter-surprise-val" class="font-mono text-amber-300">0%</span>
+          </div>
+          <div class="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden p-0.5 border border-slate-800">
+            <div id="meter-surprise-bar" class="h-full bg-amber-400 rounded-full w-0 transition-all duration-75"></div>
+          </div>
+        </div>
+
+        <div class="h-px bg-slate-800 my-1"></div>
+
+        <!-- Derived Parameters (Brightness & Motion) -->
+        <div class="space-y-3">
+          <div>
+            <div class="flex justify-between text-xs mb-1">
+              <span class="text-slate-300 font-medium flex items-center gap-1">
+                <i data-lucide="sun" class="w-3.5 h-3.5 text-yellow-300"></i>
+                Brightness (Joy - Sadness)
+              </span>
+              <span id="meter-smile-val" class="font-mono text-yellow-300">0.50</span>
+            </div>
+            <div class="w-full h-3 bg-slate-900 rounded-full overflow-hidden p-0.5 border border-slate-800">
+              <div id="meter-smile-bar" class="h-full bg-gradient-to-r from-yellow-500 to-amber-300 rounded-full w-50% transition-all duration-75"></div>
+            </div>
+            <div class="flex justify-between text-[9px] text-slate-500 mt-0.5">
+              <span>Minor</span>
+              <span>m7</span>
+              <span>add6</span>
+              <span>M7</span>
+              <span>M9</span>
+              <span>sus4</span>
+              <span>add9</span>
+              <span>Major</span>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-xs mb-1">
+              <span class="text-slate-300 font-medium flex items-center gap-1">
+                <i data-lucide="waves" class="w-3.5 h-3.5 text-cyan-400"></i>
+                Facial Motion (Head movement subtracted)
+              </span>
+              <span id="meter-motion-val" class="font-mono text-cyan-400">0.00</span>
+            </div>
+            <div class="w-full h-3 bg-slate-900 rounded-full overflow-hidden p-0.5 border border-slate-800">
+              <div id="meter-motion-bar" class="h-full bg-gradient-to-r from-cyan-500 to-indigo-400 rounded-full w-0 transition-all duration-75"></div>
+            </div>
+            <div class="flex justify-between text-[9px] text-slate-500 mt-0.5">
+              <span>Tonic (0.0)</span>
+              <span>Subdominant (0.5)</span>
+              <span>Dominant (1.0)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Expression Calibration Sliders -->
+      <div class="glass-panel p-4 flex flex-col gap-4">
+        <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+          <i data-lucide="settings-2" class="w-4 h-4 text-pink-400"></i>
+          Calibration Sliders
+        </h3>
+
+        <!-- Brightness Controls -->
+        <div class="p-3 bg-slate-900/50 rounded-xl border border-slate-800 space-y-3">
+          <span class="text-xs font-semibold text-yellow-300 block">Brightness (Joy vs Sadness)</span>
+          
+          <div>
+            <div class="flex justify-between text-[11px] mb-1">
+              <span class="text-slate-400">Gain</span>
+              <span id="smile-gain-val" class="font-mono text-yellow-400">1.8x</span>
+            </div>
+            <input type="range" id="smile-gain" min="0.5" max="5.0" step="0.1" value="1.8" class="w-full">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] mb-1">
+              <span class="text-slate-400">Threshold</span>
+              <span id="smile-thresh-val" class="font-mono text-yellow-400">0.05</span>
+            </div>
+            <input type="range" id="smile-thresh" min="0.0" max="0.4" step="0.01" value="0.05" class="w-full">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] mb-1">
+              <span class="text-slate-400">Smoothing Buffer (1-100 Frames)</span>
+              <span id="smile-smooth-val" class="font-mono text-yellow-400">15</span>
+            </div>
+            <input type="range" id="smile-smooth" min="1" max="100" step="1" value="15" class="w-full">
+          </div>
+        </div>
+
+        <!-- Motion Controls -->
+        <div class="p-3 bg-slate-900/50 rounded-xl border border-slate-800 space-y-3">
+          <span class="text-xs font-semibold text-cyan-300 block">Facial Motion / Calmness</span>
+          
+          <div>
+            <div class="flex justify-between text-[11px] mb-1">
+              <span class="text-slate-400">Gain</span>
+              <span id="motion-gain-val" class="font-mono text-cyan-400">2.5x</span>
+            </div>
+            <input type="range" id="motion-gain" min="0.5" max="5.0" step="0.1" value="2.5" class="w-full">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] mb-1">
+              <span class="text-slate-400">Threshold</span>
+              <span id="motion-thresh-val" class="font-mono text-cyan-400">0.02</span>
+            </div>
+            <input type="range" id="motion-thresh" min="0.0" max="0.3" step="0.01" value="0.02" class="w-full">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] mb-1">
+              <span class="text-slate-400">Smoothing Buffer (1-100 Frames)</span>
+              <span id="motion-smooth-val" class="font-mono text-cyan-400">12</span>
+            </div>
+            <input type="range" id="motion-smooth" min="1" max="100" step="1" value="12" class="w-full">
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- MIDDLE COLUMN: Web Audio Synthesizer Controls -->
+    <section class="lg:col-span-5 flex flex-col gap-6">
+
+      <!-- Synthesizer Architecture Panel -->
+      <div class="glass-panel-glow p-5 flex flex-col gap-5">
+        <div class="flex justify-between items-center border-b border-purple-500/20 pb-3">
+          <div class="flex items-center gap-2">
+            <i data-lucide="music" class="w-5 h-5 text-purple-400"></i>
+            <h2 class="text-base font-bold text-slate-100">Web Audio Synthesizer</h2>
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-slate-400">BPM</label>
+            <input type="number" id="bpm-number" min="40" max="240" value="110" class="w-16 px-2 py-1 text-center glass-input rounded-lg font-mono text-cyan-300 font-bold text-sm">
+          </div>
+        </div>
+
+        <!-- Master BPM Slider -->
+        <div>
+          <div class="flex justify-between text-xs mb-1">
+            <span class="text-slate-400">Global Tempo / BPM</span>
+            <span id="bpm-val" class="font-mono text-cyan-400 font-bold">110 BPM</span>
+          </div>
+          <input type="range" id="bpm-slider" min="40" max="240" step="1" value="110" class="w-full">
+        </div>
+
+        <!-- Oscillator Waveform Selection -->
+        <div>
+          <label class="text-xs font-semibold text-slate-300 block mb-2">Oscillator Waveform</label>
+          <div class="grid grid-cols-4 gap-2" id="waveform-selector">
+            <button data-wave="sine" class="wave-btn py-2 rounded-xl border border-purple-500/40 bg-purple-950/40 text-xs font-semibold text-purple-200 hover:bg-purple-900/50 transition">Sine</button>
+            <button data-wave="triangle" class="wave-btn py-2 rounded-xl border border-slate-700 bg-slate-900/60 text-xs font-semibold text-slate-400 hover:bg-slate-800 transition">Triangle</button>
+            <button data-wave="sawtooth" class="wave-btn py-2 rounded-xl border border-slate-700 bg-slate-900/60 text-xs font-semibold text-slate-400 hover:bg-slate-800 transition">Sawtooth</button>
+            <button data-wave="square" class="wave-btn py-2 rounded-xl border border-slate-700 bg-slate-900/60 text-xs font-semibold text-slate-400 hover:bg-slate-800 transition">Square</button>
+          </div>
+        </div>
+
+        <!-- ADSR Envelope Controls -->
+        <div class="p-4 bg-slate-900/70 rounded-xl border border-slate-800/80">
+          <span class="text-xs font-semibold text-purple-300 uppercase tracking-wider block mb-3">ADSR Envelope</span>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <span class="text-[10px] text-slate-400 block mb-1">Attack (<span id="adsr-a-val">0.05</span>s)</span>
+              <input type="range" id="adsr-a" min="0.01" max="1.5" step="0.01" value="0.05" class="w-full">
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 block mb-1">Decay (<span id="adsr-d-val">0.25</span>s)</span>
+              <input type="range" id="adsr-d" min="0.01" max="1.5" step="0.01" value="0.25" class="w-full">
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 block mb-1">Sustain (<span id="adsr-s-val">0.60</span>)</span>
+              <input type="range" id="adsr-s" min="0.0" max="1.0" step="0.05" value="0.60" class="w-full">
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 block mb-1">Release (<span id="adsr-r-val">0.50</span>s)</span>
+              <input type="range" id="adsr-r" min="0.05" max="2.5" step="0.05" value="0.50" class="w-full">
+            </div>
+          </div>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="p-4 bg-slate-900/70 rounded-xl border border-slate-800/80 space-y-3">
+          <div class="flex justify-between items-center">
+            <span class="text-xs font-semibold text-cyan-300 uppercase tracking-wider">Filter Settings</span>
+            <select id="filter-type" class="glass-input px-2 py-1 rounded-lg text-xs bg-slate-800 border-slate-700">
+              <option value="lowpass" selected>Lowpass</option>
+              <option value="highpass">Highpass</option>
+              <option value="bandpass">Bandpass</option>
+            </select>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <div class="flex justify-between text-[11px] mb-1">
+                <span class="text-slate-400">Cutoff Frequency</span>
+                <span id="filter-cutoff-val" class="font-mono text-cyan-300">2200 Hz</span>
+              </div>
+              <input type="range" id="filter-cutoff" min="100" max="10000" step="50" value="2200" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between text-[11px] mb-1">
+                <span class="text-slate-400">Resonance (Q)</span>
+                <span id="filter-q-val" class="font-mono text-cyan-300">2.0</span>
+              </div>
+              <input type="range" id="filter-q" min="0.1" max="15.0" step="0.1" value="2.0" class="w-full">
+            </div>
+          </div>
+        </div>
+
+        <!-- Audio Effects Panel (Tempo Sync Delay & Reverb) -->
+        <div class="p-4 bg-slate-900/70 rounded-xl border border-slate-800/80 space-y-4">
+          <span class="text-xs font-semibold text-pink-300 uppercase tracking-wider block">Master Effects</span>
+          
+          <!-- Tempo Synced Delay -->
+          <div class="space-y-2 border-b border-slate-800 pb-3">
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-slate-300 font-medium">BPM-Synced Delay</span>
+              <select id="delay-division" class="glass-input px-2 py-0.5 rounded-lg text-xs bg-slate-800 border-slate-700 font-mono text-pink-300">
+                <option value="0.25">1/16 Note</option>
+                <option value="0.5" selected>1/8 Note</option>
+                <option value="0.75">Dotted 8th</option>
+                <option value="1.0">1/4 Note</option>
+              </select>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <div class="flex justify-between text-[10px] mb-1">
+                  <span class="text-slate-400">Feedback</span>
+                  <span id="delay-fb-val" class="font-mono text-pink-300">40%</span>
+                </div>
+                <input type="range" id="delay-fb" min="0" max="0.85" step="0.05" value="0.40" class="w-full">
+              </div>
+              <div>
+                <div class="flex justify-between text-[10px] mb-1">
+                  <span class="text-slate-400">Delay Mix</span>
+                  <span id="delay-mix-val" class="font-mono text-pink-300">30%</span>
+                </div>
+                <input type="range" id="delay-mix" min="0" max="1.0" step="0.05" value="0.30" class="w-full">
+              </div>
+            </div>
+          </div>
+
+          <!-- Reverb Effect -->
+          <div class="space-y-2">
+            <span class="text-xs text-slate-300 font-medium block">Algorithmic Reverb</span>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <div class="flex justify-between text-[10px] mb-1">
+                  <span class="text-slate-400">Decay Time</span>
+                  <span id="reverb-decay-val" class="font-mono text-pink-300">2.5s</span>
+                </div>
+                <input type="range" id="reverb-decay" min="0.5" max="6.0" step="0.1" value="2.5" class="w-full">
+              </div>
+              <div>
+                <div class="flex justify-between text-[10px] mb-1">
+                  <span class="text-slate-400">Reverb Mix</span>
+                  <span id="reverb-mix-val" class="font-mono text-pink-300">35%</span>
+                </div>
+                <input type="range" id="reverb-mix" min="0" max="1.0" step="0.05" value="0.35" class="w-full">
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
+    <!-- RIGHT COLUMN: Sequencer, Arp/8-Beat Strummer, Preset File I/O -->
+    <section class="lg:col-span-3 flex flex-col gap-6">
+
+      <!-- Arpeggiator & Strummer Controls Panel -->
+      <div class="glass-panel p-4 flex flex-col gap-4">
+        <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+          <div class="flex items-center gap-2">
+            <i data-lucide="grid" class="w-4 h-4 text-cyan-400"></i>
+            <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Arpeggiator / Rhythm</h3>
+          </div>
+          <!-- Arp Toggle Switch -->
+          <label class="flex items-center cursor-pointer">
+            <span class="text-[10px] font-semibold text-slate-400 mr-2" id="arp-status-label">8-BEAT</span>
+            <input type="checkbox" id="arp-toggle" class="sr-only peer">
+            <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500 relative"></div>
+          </label>
+        </div>
+
+        <!-- Mode Selection -->
+        <div class="flex justify-between items-center text-xs">
+          <span class="text-slate-400">Arp Pattern</span>
+          <select id="arp-mode" class="glass-input px-2 py-1 rounded-lg bg-slate-800 border-slate-700 text-cyan-300">
+            <option value="up">Up</option>
+            <option value="down">Down</option>
+            <option value="updown">Up-Down</option>
+            <option value="random">Random</option>
+          </select>
+        </div>
+
+        <p class="text-[10px] text-slate-400 italic bg-slate-900/60 p-2 rounded-lg border border-slate-800">
+          <span class="text-cyan-400 font-semibold">8-Beat Mode:</span> When Arpeggiator is OFF, chords play in an 8-beat rhythm synced to BPM.
+        </p>
+
+        <!-- 16-Step Velocity Grid Display -->
+        <div>
+          <span class="text-[10px] uppercase font-semibold text-slate-400 block mb-2">16-Step Velocity Grid</span>
+          <div class="grid grid-cols-8 gap-1.5" id="step-sequencer-grid">
+            <!-- 16 steps generated dynamically in JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- JSON Preset Save / Load Panel -->
+      <div class="glass-panel p-4 flex flex-col gap-3">
+        <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+          <i data-lucide="file-json" class="w-4 h-4 text-purple-400"></i>
+          Presets (JSON Export / Import)
+        </h3>
+
+        <div>
+          <label class="text-[10px] text-slate-400 block mb-1">Preset Name</label>
+          <input type="text" id="preset-name" value="MyExpressionSynth" class="w-full glass-input px-3 py-1.5 rounded-xl text-xs font-mono">
+        </div>
+
+        <div class="flex gap-2 pt-1">
+          <button id="btn-save-json" class="flex-1 py-2 rounded-xl bg-purple-900/50 hover:bg-purple-800/60 text-purple-200 border border-purple-500/40 text-xs font-semibold transition flex items-center justify-center gap-1.5">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i> Save JSON
+          </button>
+          
+          <label class="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-xs font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer">
+            <i data-lucide="upload" class="w-3.5 h-3.5"></i> Load JSON
+            <input type="file" id="input-load-json" accept=".json" class="hidden">
+          </label>
+        </div>
+      </div>
+
+      <!-- Harmonic Logic Reference Summary -->
+      <div class="glass-panel p-4 flex flex-col gap-2">
+        <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+          <i data-lucide="book-open" class="w-4 h-4 text-emerald-400"></i>
+          Harmonic Mapping Rules
+        </h3>
+
+        <div class="text-[11px] text-slate-400 space-y-1.5 leading-relaxed">
+          <p><strong class="text-yellow-400">Brightness:</strong> Joy (Smile) - Sadness (Crying)</p>
+          <p><strong class="text-cyan-400">Facial Motion:</strong> Pure Muscle movement (head position removed) + Anger + Surprise</p>
+          <p><strong class="text-pink-400">Substitute Chords:</strong> Minor Brightness triggers Am (Tonic) / Dm (Subdominant) / E7 (Dominant, resolves to Am next cycle).</p>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <script>
+    /* ===================================================================
+       1. Application State & Calibration Parameters
+       =================================================================== */
+    const appState = {
+      // Calibration Parameters
+      smileGain: 1.8,
+      smileThreshold: 0.05,
+      smileSmoothing: 15,
+      motionGain: 2.5,
+      motionThreshold: 0.02,
+      motionSmoothing: 12,
+
+      // Live Emotion Values (0.0 to 1.0)
+      joy: 0,
+      sadness: 0,
+      anger: 0,
+      surprise: 0,
+
+      // Analysis Live Buffers
+      smileBuffer: [],
+      motionBuffer: [],
+      rawSmile: 0,
+      rawMotion: 0,
+      smoothedSmile: 0.5,
+      smoothedMotion: 0,
+
+      // Synth Settings
+      bpm: 110,
+      waveform: 'sine',
+      adsr: { attack: 0.05, decay: 0.25, sustain: 0.60, release: 0.50 },
+      filter: { type: 'lowpass', cutoff: 2200, q: 2.0 },
+      delay: { division: 0.5, feedback: 0.40, mix: 0.30 },
+      reverb: { decay: 2.5, mix: 0.35 },
+
+      // Sequencer & Arpeggiator
+      arpEnabled: false,
+      arpMode: 'up',
+      stepVelocities: [1.0, 0.7, 0.8, 0.6, 0.9, 0.7, 0.8, 0.5, 1.0, 0.7, 0.8, 0.6, 0.9, 0.7, 0.8, 0.5],
+      currentStep: 0,
+
+      // Harmonic State
+      activeChord: { name: 'C', functionName: 'Tonic (Major)', notes: [60, 64, 67, 72] },
+      forcedAmResolution: false,
+      
+      // Tracking Status
+      cameraActive: false,
+      audioStarted: false,
+      prevNormLandmarks: null
+    };
+
+    /* ===================================================================
+       2. Web Audio API Engine Architecture
+       =================================================================== */
+    class AudioEngine {
+      constructor() {
+        this.ctx = null;
+        this.masterGain = null;
+        this.filterNode = null;
+        
+        // Delay Nodes
+        this.delayNode = null;
+        this.delayFeedbackNode = null;
+        this.delayMixGain = null;
+
+        // Reverb Nodes
+        this.convolverNode = null;
+        this.reverbMixGain = null;
+
+        // Sequencer Clock
+        this.timerId = null;
+        this.nextNoteTime = 0;
+        this.arpNoteIndex = 0;
+      }
+
+      init() {
+        if (this.ctx) return;
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        this.ctx = new AudioCtx();
+
+        // Master Output Gain
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.setValueAtTime(0.7, this.ctx.currentTime);
+
+        // Main Filter
+        this.filterNode = this.ctx.createBiquadFilter();
+        this.filterNode.type = appState.filter.type;
+        this.filterNode.frequency.setValueAtTime(appState.filter.cutoff, this.ctx.currentTime);
+        this.filterNode.Q.setValueAtTime(appState.filter.q, this.ctx.currentTime);
+
+        // Delay Loop Setup
+        this.delayNode = this.ctx.createDelay(2.0);
+        this.delayFeedbackNode = this.ctx.createGain();
+        this.delayMixGain = this.ctx.createGain();
+
+        this.updateDelayParams();
+
+        this.filterNode.connect(this.delayNode);
+        this.delayNode.connect(this.delayFeedbackNode);
+        this.delayFeedbackNode.connect(this.delayNode);
+        this.delayNode.connect(this.delayMixGain);
+        this.delayMixGain.connect(this.masterGain);
+
+        // Reverb Setup
+        this.convolverNode = this.ctx.createConvolver();
+        this.reverbMixGain = this.ctx.createGain();
+        this.reverbMixGain.gain.setValueAtTime(appState.reverb.mix, this.ctx.currentTime);
+
+        this.updateReverbImpulse();
+
+        this.filterNode.connect(this.convolverNode);
+        this.convolverNode.connect(this.reverbMixGain);
+        this.reverbMixGain.connect(this.masterGain);
+
+        // Direct Signal to Master
+        this.filterNode.connect(this.masterGain);
+        this.masterGain.connect(this.ctx.destination);
+
+        // Start Scheduler Clock
+        this.nextNoteTime = this.ctx.currentTime;
+        this.startScheduler();
+      }
+
+      updateDelayParams() {
+        if (!this.ctx) return;
+        const secondsPerBeat = 60.0 / appState.bpm;
+        const delayTime = secondsPerBeat * appState.delay.division;
+        this.delayNode.delayTime.cancelScheduledValues(this.ctx.currentTime);
+        this.delayNode.delayTime.setValueAtTime(delayTime, this.ctx.currentTime);
+        this.delayFeedbackNode.gain.setValueAtTime(appState.delay.feedback, this.ctx.currentTime);
+        this.delayMixGain.gain.setValueAtTime(appState.delay.mix, this.ctx.currentTime);
+      }
+
+      updateReverbImpulse() {
+        if (!this.ctx) return;
+        const rate = this.ctx.sampleRate;
+        const length = rate * appState.reverb.decay;
+        const impulse = this.ctx.createBuffer(2, length, rate);
+        const left = impulse.getChannelData(0);
+        const right = impulse.getChannelData(1);
+
+        for (let i = 0; i < length; i++) {
+          const decay = Math.pow(1 - i / length, 2.5);
+          left[i] = (Math.random() * 2 - 1) * decay;
+          right[i] = (Math.random() * 2 - 1) * decay;
+        }
+
+        this.convolverNode.buffer = impulse;
+        this.reverbMixGain.gain.setValueAtTime(appState.reverb.mix, this.ctx.currentTime);
+      }
+
+      midiToFreq(midi) {
+        return 440 * Math.pow(2, (midi - 69) / 12);
+      }
+
+      playNote(midiNote, time, velocity = 1.0, duration = 0.2) {
+        if (!this.ctx || velocity <= 0.01) return;
+
+        const osc = this.ctx.createOscillator();
+        const noteGain = this.ctx.createGain();
+
+        osc.type = appState.waveform;
+        osc.frequency.setValueAtTime(this.midiToFreq(midiNote), time);
+
+        // ADSR Envelope
+        const { attack, decay, sustain, release } = appState.adsr;
+        const peakGain = velocity * 0.35;
+        const sustainGain = peakGain * sustain;
+
+        noteGain.gain.cancelScheduledValues(time);
+        noteGain.gain.setValueAtTime(0.0001, time);
+        noteGain.gain.linearRampToValueAtTime(peakGain, time + attack);
+        noteGain.gain.linearRampToValueAtTime(sustainGain, time + attack + decay);
+        noteGain.gain.setValueAtTime(sustainGain, time + duration);
+        noteGain.gain.exponentialRampToValueAtTime(0.0001, time + duration + release);
+
+        osc.connect(noteGain);
+        noteGain.connect(this.filterNode);
+
+        osc.start(time);
+        osc.stop(time + duration + release + 0.1);
+      }
+
+      startScheduler() {
+        if (this.timerId) clearInterval(this.timerId);
+        this.timerId = setInterval(() => this.scheduleNextStep(), 25);
+      }
+
+      scheduleNextStep() {
+        if (!this.ctx) return;
+
+        const secondsPer16th = (60.0 / appState.bpm) / 4.0;
+        const lookahead = 0.1; // 100ms lookahead
+
+        while (this.nextNoteTime < this.ctx.currentTime + lookahead) {
+          this.triggerStep(appState.currentStep, this.nextNoteTime, secondsPer16th);
+          this.nextNoteTime += secondsPer16th;
+          appState.currentStep = (appState.currentStep + 1) % 16;
+        }
+      }
+
+      triggerStep(step, time, stepDuration) {
+        const velocity = appState.stepVelocities[step];
+        const chordNotes = appState.activeChord.notes;
+
+        if (!chordNotes || chordNotes.length === 0) return;
+
+        requestAnimationFrame(() => updateSequencerStepUI(step));
+
+        if (appState.arpEnabled) {
+          // Arpeggiator Mode
+          let noteMidi = chordNotes[0];
+          const len = chordNotes.length;
+
+          if (appState.arpMode === 'up') {
+            noteMidi = chordNotes[this.arpNoteIndex % len];
+          } else if (appState.arpMode === 'down') {
+            noteMidi = chordNotes[(len - 1 - (this.arpNoteIndex % len))];
+          } else if (appState.arpMode === 'updown') {
+            const doubleLen = (len - 1) * 2 || 1;
+            const idx = this.arpNoteIndex % doubleLen;
+            noteMidi = idx < len ? chordNotes[idx] : chordNotes[doubleLen - idx];
+          } else if (appState.arpMode === 'random') {
+            noteMidi = chordNotes[Math.floor(Math.random() * len)];
+          }
+
+          this.playNote(noteMidi, time, velocity, stepDuration * 0.9);
+          this.arpNoteIndex++;
+        } else {
+          // 8-Beat Strummer Mode (Triggers on steps 0, 2, 4, 6, 8, 10, 12, 14)
+          if (step % 2 === 0) {
+            chordNotes.forEach((midi, idx) => {
+              const strumDelay = idx * 0.012;
+              this.playNote(midi, time + strumDelay, velocity, stepDuration * 1.8);
+            });
+          }
+        }
+      }
+    }
+
+    const audioEngine = new AudioEngine();
+
+    /* ===================================================================
+       3. C-Major Scale Chord & Harmonic Rule Engine
+       =================================================================== */
+    const BrightnessLevels = ['Minor', 'm7', 'add6', 'M7', 'M9', 'sus4', 'add9', 'Major'];
+    const CalmnessLevels = ['Tonic', 'Subdominant', 'Dominant'];
+
+    const ChordDatabase = {
+      // TONIC (C Major / Am Substitutes)
+      'Tonic_Major': [60, 64, 67, 72],        // C Major
+      'Tonic_add9': [60, 64, 67, 74],         // Cadd9
+      'Tonic_sus4': [60, 65, 67, 72],         // Csus4
+      'Tonic_M9': [60, 64, 67, 71, 74],       // CM9
+      'Tonic_M7': [60, 64, 67, 71],           // CM7
+      'Tonic_add6': [60, 64, 67, 69],         // C6
+      'Tonic_m7': [57, 60, 64, 67],           // Am7 (Substitute)
+      'Tonic_Minor': [57, 60, 64, 69],        // Am (Substitute)
+
+      // SUBDOMINANT (F Major / Dm Substitutes)
+      'Subdominant_Major': [53, 57, 60, 65],  // F Major
+      'Subdominant_add9': [53, 57, 60, 67],   // Fadd9
+      'Subdominant_sus4': [53, 58, 60, 65],   // Fsus4
+      'Subdominant_M9': [53, 57, 60, 64, 67], // FM9
+      'Subdominant_M7': [53, 57, 60, 64],     // FM7
+      'Subdominant_add6': [53, 57, 60, 62],     // F6
+      'Subdominant_m7': [50, 53, 57, 60],     // Dm7 (Substitute)
+      'Subdominant_Minor': [50, 53, 57, 62],  // Dm (Substitute)
+
+      // DOMINANT (G Major / E7 Special Rule)
+      'Dominant_Major': [55, 59, 62, 67],     // G Major
+      'Dominant_add9': [55, 59, 62, 69],      // Gadd9
+      'Dominant_sus4': [55, 60, 62, 67],      // Gsus4
+      'Dominant_M9': [55, 59, 62, 65, 69],    // G9
+      'Dominant_M7': [55, 59, 62, 65],        // G7
+      'Dominant_add6': [55, 59, 62, 64],        // G6
+      'Dominant_m7': [52, 56, 59, 62],        // E7 (Special Rule!)
+      'Dominant_Minor': [52, 56, 59, 62]      // E7 (Special Rule!)
+    };
+
+    function evaluateChordFromExpressions(smileVal, motionVal) {
+      // Check if special E7 resolution was triggered in previous cycle
+      if (appState.forcedAmResolution) {
+        appState.forcedAmResolution = false;
+        return {
+          name: 'Am',
+          functionName: 'Tonic Minor (E7 Resolution)',
+          notes: ChordDatabase['Tonic_Minor']
+        };
+      }
+
+      // Map Smile/Brightness (0..1) to 8 levels
+      const smileIndex = Math.min(7, Math.floor(smileVal * 8));
+      const brightnessType = BrightnessLevels[smileIndex];
+
+      // Map Motion/Calmness (0..1) to 3 Function levels
+      const motionIndex = Math.min(2, Math.floor(motionVal * 3));
+      const calmnessType = CalmnessLevels[motionIndex];
+
+      const isMinorFamily = (brightnessType === 'Minor' || brightnessType === 'm7');
+
+      let chordKey = `${calmnessType}_${brightnessType}`;
+      let chordName = '';
+      let functionLabel = `${calmnessType} (${brightnessType})`;
+
+      if (!isMinorFamily) {
+        if (calmnessType === 'Tonic') chordName = `C${brightnessType === 'Major' ? '' : brightnessType}`;
+        else if (calmnessType === 'Subdominant') chordName = `F${brightnessType === 'Major' ? '' : brightnessType}`;
+        else if (calmnessType === 'Dominant') chordName = `G${brightnessType === 'Major' ? '' : brightnessType}`;
+      } else {
+        if (calmnessType === 'Tonic') {
+          chordName = brightnessType === 'm7' ? 'Am7' : 'Am';
+          functionLabel = 'Tonic Minor (Am)';
+        } else if (calmnessType === 'Subdominant') {
+          chordName = brightnessType === 'm7' ? 'Dm7' : 'Dm';
+          functionLabel = 'Subdominant Minor (Dm)';
+        } else if (calmnessType === 'Dominant') {
+          chordName = 'E7';
+          functionLabel = 'Dominant Substitute (E7 -> Am Next)';
+          appState.forcedAmResolution = true; // Enforce resolution on next cycle!
+        }
+      }
+
+      const notes = ChordDatabase[chordKey] || [60, 64, 67, 72];
+
+      return {
+        name: chordName,
+        functionName: functionLabel,
+        notes: notes
+      };
+    }
+
+    /* ===================================================================
+       4. Landmark Alignment & 4-Emotion Analysis Logic
+       =================================================================== */
+    const videoElem = document.getElementById('webcam-video');
+    const canvasElem = document.getElementById('face-canvas');
+    const canvasCtx = canvasElem.getContext('2d');
+
+    // Head-pose normalization function to extract muscle movement only
+    function normalizeLandmarks(landmarks) {
+      if (!landmarks || landmarks.length === 0) return null;
+
+      // Key reference points: Eye outer corners (33: Left, 263: Right)
+      const leftEye = landmarks[33];
+      const rightEye = landmarks[263];
+
+      const eyeCenter = {
+        x: (leftEye.x + rightEye.x) / 2,
+        y: (leftEye.y + rightEye.y) / 2
+      };
+
+      const dx = rightEye.x - leftEye.x;
+      const dy = rightEye.y - leftEye.y;
+      const eyeDist = Math.hypot(dx, dy) || 0.001;
+      const headAngle = Math.atan2(dy, dx);
+
+      const cosA = Math.cos(-headAngle);
+      const sinA = Math.sin(-headAngle);
+
+      const normalized = new Array(landmarks.length);
+      for (let i = 0; i < landmarks.length; i++) {
+        const pt = landmarks[i];
+        // 1. Translate center
+        const tx = pt.x - eyeCenter.x;
+        const ty = pt.y - eyeCenter.y;
+        // 2. Rotate to horizontal eye line
+        const rx = tx * cosA - ty * sinA;
+        const ry = tx * sinA + ty * cosA;
+        // 3. Scale by eye distance
+        normalized[i] = { x: rx / eyeDist, y: ry / eyeDist };
+      }
+
+      return normalized;
+    }
+
+    function analyzeEmotionsAndMotion(landmarks, normLandmarks) {
+      if (!normLandmarks) return;
+
+      const N = normLandmarks;
+
+      // 1. Mouth Geometry
+      // Mouth corners: 61 (left), 291 (right)
+      // Upper/Lower lip center: 13, 14
+      const leftCorner = N[61];
+      const rightCorner = N[291];
+      const upperLip = N[13];
+      const lowerLip = N[14];
+
+      const mouthWidth = Math.hypot(rightCorner.x - leftCorner.x, rightCorner.y - leftCorner.y);
+      const mouthHeight = Math.hypot(upperLip.x - lowerLip.x, upperLip.y - lowerLip.y);
+
+      const lipCenterY = (upperLip.y + lowerLip.y) / 2;
+      const mouthCornerAvgY = (leftCorner.y + rightCorner.y) / 2;
+      
+      // In normalized orientation, Y goes downward. Lifted smile corner means lower Y relative to lips.
+      const smileCornerLift = lipCenterY - mouthCornerAvgY;
+
+      // 2. Eyebrow & Eye Geometry
+      // Inner Eyebrows: 55 (left), 285 (right)
+      // Eyebrow top: 105 (left), 334 (right)
+      // Eye aperture: 159 vs 145 (left eye), 386 vs 374 (right eye)
+      const eyebrowInnerDist = Math.hypot(N[285].x - N[55].x, N[285].y - N[55].y);
+      const leftEyeAperture = Math.hypot(N[159].x - N[145].x, N[159].y - N[145].y);
+      const rightEyeAperture = Math.hypot(N[386].x - N[374].x, N[386].y - N[374].y);
+      const eyeApertureAvg = (leftEyeAperture + rightEyeAperture) / 2;
+
+      const eyebrowHeightAvg = -(N[55].y + N[285].y) / 2; // Inverted Y
+
+      // -------------------------------------------------------------
+      // 3. Calculate 4 Emotion Scores (0.0 to 1.0)
+      // -------------------------------------------------------------
+      
+      // Joy / Smile (笑顔/喜び): Lifted corners + wider mouth
+      let joyScore = Math.max(0, (smileCornerLift + 0.08) * 6.0 + (mouthWidth - 0.75) * 1.5);
+      joyScore = Math.min(1.0, joyScore);
+
+      // Sadness / Crying (泣き/悲しみ): Drooping mouth corners + lowered lips
+      let sadnessScore = Math.max(0, (-smileCornerLift - 0.04) * 6.0);
+      sadnessScore = Math.min(1.0, sadnessScore);
+
+      // Anger (怒り): Eyebrows pulled together (low inner dist) + narrowed eyes
+      let angerScore = Math.max(0, (0.55 - eyebrowInnerDist) * 5.0);
+      angerScore = Math.min(1.0, angerScore);
+
+      // Surprise (驚き): Mouth wide open + eyebrows raised high
+      let surpriseScore = Math.max(0, (mouthHeight - 0.22) * 3.5 + (eyebrowHeightAvg - 0.35) * 2.5);
+      surpriseScore = Math.min(1.0, surpriseScore);
+
+      appState.joy = joyScore;
+      appState.sadness = sadnessScore;
+      appState.anger = angerScore;
+      appState.surprise = surpriseScore;
+
+      // -------------------------------------------------------------
+      // 4. Calculate Derived Brightness Parameter
+      // Brightness = Joy (Smile) - Sadness (Crying)
+      // -------------------------------------------------------------
+      const emotionDiff = joyScore - sadnessScore; // Range [-1.0, +1.0]
+      const rawBrightness = Math.min(1.0, Math.max(0.0, 0.5 + 0.5 * emotionDiff));
+
+      appState.rawSmile = rawBrightness;
+
+      // -------------------------------------------------------------
+      // 5. Calculate Pure Facial Muscle Motion (Head Movement Subtracted)
+      // -------------------------------------------------------------
+      let pureMuscleMotion = 0;
+      if (appState.prevNormLandmarks) {
+        let sumDelta = 0;
+        // Sample 30 landmark points across face
+        for (let i = 0; i < N.length; i += 15) {
+          sumDelta += Math.hypot(N[i].x - appState.prevNormLandmarks[i].x, N[i].y - appState.prevNormLandmarks[i].y);
+        }
+        pureMuscleMotion = (sumDelta / (N.length / 15)) * 12.0;
+      }
+      appState.prevNormLandmarks = N;
+
+      // Add Anger & Surprise intensity to Motion parameter
+      const motionWithEmotions = pureMuscleMotion + (angerScore * 0.35) + (surpriseScore * 0.40);
+      appState.rawMotion = Math.min(1.0, motionWithEmotions);
+    }
+
+    async function setupCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, facingMode: 'user' },
+          audio: false
+        });
+        videoElem.srcObject = stream;
+        await videoElem.play();
+
+        document.getElementById('camera-placeholder').classList.add('hidden');
+        videoElem.classList.remove('hidden');
+        document.getElementById('camera-status').textContent = 'Camera Active';
+        document.getElementById('camera-status').className = 'text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-500/30';
+        appState.cameraActive = true;
+
+        initMediaPipeFaceMesh();
+      } catch (err) {
+        console.warn('Camera access denied or unavailable.', err);
+        document.getElementById('camera-status').textContent = 'Standby Mode';
+      }
+    }
+
+    function initMediaPipeFaceMesh() {
+      if (typeof FaceMesh === 'undefined') {
+        console.warn('MediaPipe CDN unavailable.');
+        return;
+      }
+
+      const faceMesh = new FaceMesh({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+      });
+
+      faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      faceMesh.onResults(onFaceMeshResults);
+
+      const camera = new Camera(videoElem, {
+        onFrame: async () => {
+          await faceMesh.send({ image: videoElem });
+        },
+        width: 640,
+        height: 480
+      });
+      camera.start();
+    }
+
+    function onFaceMeshResults(results) {
+      canvasElem.width = videoElem.videoWidth || 640;
+      canvasElem.height = videoElem.videoHeight || 480;
+      canvasCtx.clearRect(0, 0, canvasElem.width, canvasElem.height);
+
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        const landmarks = results.multiFaceLandmarks[0];
+        
+        // Render Landmarks Canvas Overlay
+        drawFaceMeshOverlay(landmarks);
+
+        // Normalize landmarks (subtract head movement)
+        const normLandmarks = normalizeLandmarks(landmarks);
+
+        // Analyze Emotions & Facial Muscle Motion
+        analyzeEmotionsAndMotion(landmarks, normLandmarks);
+      }
+
+      processAndSmoothExpressionValues();
+    }
+
+    function drawFaceMeshOverlay(landmarks) {
+      const w = canvasElem.width;
+      const h = canvasElem.height;
+
+      canvasCtx.fillStyle = 'rgba(56, 189, 248, 0.6)';
+      for (let i = 0; i < landmarks.length; i += 10) {
+        const x = landmarks[i].x * w;
+        const y = landmarks[i].y * h;
+        canvasCtx.beginPath();
+        canvasCtx.arc(x, y, 1.8, 0, 2 * Math.PI);
+        canvasCtx.fill();
+      }
+
+      // Highlight Mouth
+      canvasCtx.strokeStyle = '#facc15';
+      canvasCtx.lineWidth = 1.5;
+      canvasCtx.beginPath();
+      [61, 13, 291, 14].forEach((idx, i) => {
+        const pt = landmarks[idx];
+        if (i === 0) canvasCtx.moveTo(pt.x * w, pt.y * h);
+        else canvasCtx.lineTo(pt.x * w, pt.y * h);
+      });
+      canvasCtx.closePath();
+      canvasCtx.stroke();
+    }
+
+    function processAndSmoothExpressionValues() {
+      // 1. Update 4-Emotion UI Meters
+      document.getElementById('meter-joy-val').textContent = `${Math.round(appState.joy * 100)}%`;
+      document.getElementById('meter-joy-bar').style.width = `${Math.round(appState.joy * 100)}%`;
+
+      document.getElementById('meter-sad-val').textContent = `${Math.round(appState.sadness * 100)}%`;
+      document.getElementById('meter-sad-bar').style.width = `${Math.round(appState.sadness * 100)}%`;
+
+      document.getElementById('meter-anger-val').textContent = `${Math.round(appState.anger * 100)}%`;
+      document.getElementById('meter-anger-bar').style.width = `${Math.round(appState.anger * 100)}%`;
+
+      document.getElementById('meter-surprise-val').textContent = `${Math.round(appState.surprise * 100)}%`;
+      document.getElementById('meter-surprise-bar').style.width = `${Math.round(appState.surprise * 100)}%`;
+
+      // 2. Brightness Calibration with Gain, Threshold, and Smoothing
+      let smileProc = Math.max(0, appState.rawSmile - appState.smileThreshold) * appState.smileGain;
+      smileProc = Math.min(1.0, smileProc);
+
+      appState.smileBuffer.push(smileProc);
+      while (appState.smileBuffer.length > appState.smileSmoothing) appState.smileBuffer.shift();
+      appState.smoothedSmile = appState.smileBuffer.reduce((a, b) => a + b, 0) / appState.smileBuffer.length;
+
+      // 3. Motion Calibration with Gain, Threshold, and Smoothing
+      let motionProc = Math.max(0, appState.rawMotion - appState.motionThreshold) * appState.motionGain;
+      motionProc = Math.min(1.0, motionProc);
+
+      appState.motionBuffer.push(motionProc);
+      while (appState.motionBuffer.length > appState.motionSmoothing) appState.motionBuffer.shift();
+      appState.smoothedMotion = appState.motionBuffer.reduce((a, b) => a + b, 0) / appState.motionBuffer.length;
+
+      // Update Meter DOM
+      document.getElementById('meter-smile-val').textContent = appState.smoothedSmile.toFixed(2);
+      document.getElementById('meter-smile-bar').style.width = `${(appState.smoothedSmile * 100).toFixed(1)}%`;
+
+      document.getElementById('meter-motion-val').textContent = appState.smoothedMotion.toFixed(2);
+      document.getElementById('meter-motion-bar').style.width = `${(appState.smoothedMotion * 100).toFixed(1)}%`;
+
+      // 4. Evaluate Chord
+      const newChord = evaluateChordFromExpressions(appState.smoothedSmile, appState.smoothedMotion);
+      appState.activeChord = newChord;
+
+      // Update Header Banner
+      document.getElementById('chord-display-name').textContent = newChord.name;
+      document.getElementById('chord-display-function').textContent = newChord.functionName;
+      document.getElementById('chord-display-notes').textContent = newChord.notes.map(midiToNoteName).join(' · ');
+    }
+
+    function midiToNoteName(midi) {
+      const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+      const oct = Math.floor(midi / 12) - 1;
+      return `${names[midi % 12]}${oct}`;
+    }
+
+    /* ===================================================================
+       5. User Interface Events & JSON Preset System
+       =================================================================== */
+    function initUI() {
+      if (window.lucide) lucide.createIcons();
+
+      // Audio Engine Toggle Button
+      const audioBtn = document.getElementById('btn-audio-start');
+      audioBtn.addEventListener('click', () => {
+        audioEngine.init();
+        if (audioEngine.ctx.state === 'suspended') {
+          audioEngine.ctx.resume();
+        }
+        appState.audioStarted = true;
+        document.getElementById('audio-btn-label').textContent = 'Audio Active';
+        audioBtn.className = 'px-5 py-2.5 rounded-xl font-semibold text-sm bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 transition-all flex items-center gap-2';
+      });
+
+      // Camera Enable Button
+      document.getElementById('btn-start-camera').addEventListener('click', () => {
+        setupCamera();
+      });
+
+      // Calibration Sliders
+      setupSlider('smile-gain', 'smile-gain-val', (v) => appState.smileGain = v, 'x');
+      setupSlider('smile-thresh', 'smile-thresh-val', (v) => appState.smileThreshold = v);
+      setupSlider('smile-smooth', 'smile-smooth-val', (v) => appState.
